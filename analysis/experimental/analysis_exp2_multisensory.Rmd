@@ -1,0 +1,244 @@
+---
+title: "exp2_multisensory"
+output: html_document
+---
+
+# Load packages 
+```{r setup, echo=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("rstan")
+
+library("knitr") # for knitting things
+library("tidyverse") # for all things tidyverse
+library("svglite") # export svg
+library("broom.mixed") # for cleaning up regression results
+library("janitor") # for cleaning variable names
+
+library("tidybayes") # for generating predictions from posterior
+library("brms")
+library("Hmisc")
+library("ggeffects") # for predictions
+```
+
+## Settings
+```{r}
+theme_set(theme_classic() + 
+    theme(text = element_text(size = 24)))
+
+opts_chunk$set(comment = "#>",
+               fig.show = "hold")
+
+options(dplyr.summarise.inform = F)
+```
+
+
+## Data Wrangling
+```{r}
+# IMPORT DATA & PREPROCESS
+# check out your current working directory
+getwd()
+ourPath = "../../data/exp2_multisensory/"
+# select the desired file(s)
+csvNames = list.files(path = ourPath, pattern = NULL, 
+                      all.files = FALSE, full.names = FALSE)
+
+data.2.df = data.frame(readr::read_csv(paste0(ourPath, csvNames), 
+                                       id = "file_name", col_names = TRUE)) %>% 
+  ungroup() %>% 
+  # gather id number from the structure of the data files
+  mutate(id = as.numeric(str_remove(str_extract(file_name, "(?<=s_).*"),
+                                    ".csv"))) %>%
+  ## Modifications for Analysis
+  # (1) response was coded as 1 for non-causal and 2 for causal
+  #     -subtract one to set them as 0 and 1 -> good for later manipulation
+  mutate(response = response - 1) %>% 
+  # (2) block was coded for all multisensory conditions
+  #     -also let's make it a factor 
+  rename(block = feedbackBlock) %>% 
+  mutate(block = ifelse(block == 1,"visual", ifelse(block == 2,"audio",
+                 ifelse(block == 3,"kines", ifelse(block == 4,"vibro",
+                 ifelse(block == 5,"audioKines", ifelse(block == 6,"audioVibro", 
+                 ifelse(block == 7,"kinesVibro", "audioKinesVibro")))))))) %>% 
+  mutate(block = factor(block,
+                        levels = c("visual","audio","kines","vibro",
+                                   "audioKines","audioVibro","kinesVibro",
+                                   "audioKinesVibro"))) %>%
+  # (3) note the number of total signals present
+  mutate(signals = ifelse(block == "visual", 0, 
+                   ifelse(block == "audio" | block == "kines" | block == "vibro", 1, 
+                   ifelse(block == "audioKinesVibro", 3, 2)))) %>% 
+  ## Additions
+  # (1) condition to encode if it was vision only or multisensory
+  mutate(condition = ifelse(block == "visual", 0, 1)) %>% 
+  mutate(condition = factor(condition)) %>%
+  # group by participant id, block (modality), and offset
+  group_by(id, block, offset) %>% 
+  # (2) causalTotal: sum causal responses per offset per block
+  mutate(causalTotal = sum(response == 1)) %>% 
+  # (3) numTrials: get total number of trials per offset (as this can change)
+  mutate(numTrials = sum(response == 1) + sum(response == 0)) %>%
+  # (4) causalPercentage: causalTotal/numTrials
+  mutate(causalPercentage = causalTotal/numTrials) %>% ungroup() %>% 
+  arrange(-id)
+
+# Grab just the causal totals (1 per offsetXblock combo)
+data.2.sub.df = data.2.df %>% 
+  select(id, offset, block, signals, causalTotal, numTrials, causalPercentage) %>% 
+  arrange(id, block, offset) %>% unique()
+
+# Grab just the causal totals (1 per offsetXblock combo)
+data.2.sub.sub.df = data.2.df %>% ungroup() %>% group_by(block, offset) %>% 
+  mutate(causalTotal = sum(response == 1)) %>% 
+  mutate(causalPercentage = causalTotal/(numTrials * 19)) %>% 
+  select(offset, block, signals, causalTotal, numTrials, causalPercentage) %>% 
+  arrange(block, offset) %>% unique()
+
+# Check Out the Data
+glimpse(data.2.df)
+glimpse(data.2.sub.df)
+glimpse(data.2.sub.sub.df)
+```
+
+## Check Hypotheses
+```{r}
+# M1
+m.1 = brm(formula = response ~ 1 + offset + (1 + offset | id),
+          family = "bernoulli", data = data.2.df,
+          seed = 1, iter = 1000,
+          file = "cache/exp2.m.1")
+m.1 %>% summary()
+# (H1) Temporal Offset
+hypothesis(m.1, hypothesis = "offset < 0")
+
+# M2
+m.2.int = brm(formula = response ~ 1 + condition*offset +
+                (1 + condition*offset | id),
+              family = "bernoulli", data = data.2.df,
+              seed = 1, chains = 5, iter = 5000, warmup = 4000, 
+              control = list(adapt_delta = 0.9), 
+              save_pars = save_pars(all = TRUE), 
+              file = "cache/exp2.m.2.int") # 1 divergent transition
+summary(m.2.int)
+
+# M3
+m.3.int = brm(formula = response ~ 1 + signals*offset + 
+                (1 + signals*offset | id),
+              family = "bernoulli", data = data.2.df,
+              seed = 1, chains = 4, iter = 4000, warmup = 3000,
+              control = list(adapt_delta = 0.9, max_treedepth = 11),
+              save_pars = save_pars(all = TRUE),
+              file = "cache/exp2.m.3.int")
+summary(m.3.int)
+
+# (H2) Multisensory Condition vs. Number of Signals
+loo(m.2.int, m.3.int, moment_match = TRUE)
+```
+
+# Visualize
+```{r}
+# Ungrouped
+data.plot = data.2.df %>% ungroup() %>% 
+  mutate(conditionPlot = ifelse(block == "visual", 1, block))
+
+offset.labs <- c("0 ms", "100 ms", "200 ms", "300 ms", "400 ms", "500 ms", "600 ms")
+names(offset.labs) <- c("0", "100", "200", "300", "400", "500", "600")
+
+exp3.results.all.facet = 
+ggplot(data.plot, aes(x = as.factor(block), y = response, color = as.factor(block))) +
+  # facet by offset
+  facet_grid(cols = vars(offset), labeller = labeller(offset = offset)) +
+  # base data with mean and confidence interval
+  stat_summary(fun.data = "mean_cl_boot",
+               size = 1, alpha = 0.5) +
+  # colors
+  scale_colour_manual(values = c('#4E4E4E','#68C16A','#F7D027','#B54ECF',
+                                 '#E62121','#3A88E0','pink','#003f5c')) +
+  scale_fill_manual(values = c('#4E4E4E','#68C16A','#F7D027','#B54ECF',
+                                 '#E62121','#3A88E0','pink','#003f5c')) +
+  # scales
+  scale_y_continuous(name = "Causal Response Rate") +
+  scale_x_discrete(name = "Offset (ms)",breaks = NULL) +
+  theme(legend.title = element_blank(),
+        # text = element_text(size=8),
+        axis.text.x = element_text(size = 0),
+        panel.grid.minor.x = element_blank(),
+        axis.text.y = element_text(size = 16), aspect.ratio = 2.25, 
+        legend.position = "none")
+
+exp3.results.all.facet
+```
+
+
+```{r}
+# Multisensory Condition
+m.2.predictions.df = ggpredict(m.2.int, terms = c("offset", "condition"))
+
+data.m.2.plot = data.2.df %>% ungroup() %>% 
+  mutate(conditionPlot = ifelse(block == "visual", 0, 1))
+
+exp3.results.condition = 
+ggplot(m.2.predictions.df, aes(x = x, y = predicted, color = group)) +
+  # + offset predictions
+  geom_ribbon(mapping = aes(ymin = conf.low,
+                            ymax = conf.high,
+                            fill = group),
+              alpha = 0.2,
+              color = NA) +
+  geom_line(linewidth = 1) +
+  # base data with mean and confidence interval
+  stat_summary(data = data.m.2.plot,
+               mapping = aes(x = offset, y = response, color = as.factor(conditionPlot)),
+               fun.data = "mean_cl_boot",
+               size = 1, alpha = 0.5) + 
+  # colors
+  scale_colour_manual(values = c('#4E4E4E','#3A88E0')) + 
+  scale_fill_manual(values = c('#4E4E4E','#3A88E0')) + 
+  # scales
+  # coord_cartesian(xlim = c(0, 600), ylim = c(0,1)) +
+  scale_y_continuous(name = "Causal Response Rate") +
+  scale_x_continuous(name = "Offset (ms)") +
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16), aspect.ratio = 0.75, 
+        legend.position = "none")
+
+exp3.results.condition
+```
+
+```{r}
+# Number of Signals
+m.3.predictions.df = ggpredict(m.3.int, terms = c("offset", "signals"))
+
+signalPalette = c("#003f5c", "#7a5195", "#ef5675", "#ffa600")
+
+exp3.results.signal = 
+ggplot(m.3.predictions.df, aes(x = x, y = predicted, color = group)) +
+  # + offset predictions
+  geom_ribbon(mapping = aes(ymin = conf.low,
+                            ymax = conf.high,
+                            fill = group),
+              alpha = 0.2,
+              color = NA) +
+  geom_line(linewidth = 1) +
+  # base data with mean and confidence interval
+  stat_summary(data = data.2.df,
+               mapping = aes(x = offset, y = response, color = as.factor(signals)),
+               fun.data = "mean_cl_boot",
+               size = 1, alpha = 0.5) +
+  # colors
+  scale_colour_manual(values = signalPalette) +
+  scale_fill_manual(values = signalPalette) +
+  # scales
+  # coord_cartesian(xlim = c(-100, 600), ylim = c(0,1)) +
+  scale_y_continuous(name = "Causal Response Rate") +
+  scale_x_continuous(name = "Offset (ms)") +
+  theme(legend.title = element_blank(),
+        # text = element_text(size=8),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16), aspect.ratio = 0.75, 
+        legend.position = "none")
+
+exp3.results.signal
+```
+

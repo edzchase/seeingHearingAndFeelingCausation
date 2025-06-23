@@ -1,0 +1,374 @@
+---
+title: "finalFit"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# don't need for sherlock
+library("knitr") # for rmd
+library("ggplot2") # for generating plots
+
+# need for sherlock
+library("rwebppl") # for webppl probabalistic programming
+library("dplyr") # for pipes
+library("broom") # for tidy
+
+library("stringr") # str_c
+library("caret")
+
+# Installing Webppl
+# install.packages('devtools') # needed to install rwebppl
+# devtools::install_github("mhtess/rwebppl")
+```
+
+## Settings: for plotting
+```{r}
+theme_set(theme_classic() + 
+    theme(text = element_text(size = 10)))
+
+opts_chunk$set(comment = "#>",
+               fig.show = "hold")
+
+options(dplyr.summarise.inform = F)
+
+# for similarity of colors
+unPalette = c('#E62121', '#3A88E0', '#F7D027', '#68C16A', '#A121C1')
+sensePalette <- c('#4E4E4E', unPalette[3], unPalette[4], unPalette[5])
+
+signalPalette = c("#003f5c", "#7a5195", "#ef5675", "#ffa600")
+
+newBlue = "#349CE9"
+newLightGreen = "#A6D12E"
+realismPalette = c(newBlue, newLightGreen)
+# '#5AAEAB'
+cueInfoPalette = c(newBlue, '#36716F', newLightGreen)
+
+## Labels
+offset.labs <- c("0 ms", "100 ms", "200 ms", "300 ms", "400 ms")
+names(offset.labs) <- c("0", "100", "200", "300", "400")
+```
+
+# other functions & shared values
+```{r}
+# Fitting the Model Output to the Likert Data
+epsilon = 0.035
+# logit function
+logit <- function(p) {
+	log(p / (1 - p))
+}
+```
+
+# plot the best one
+## Exp 1 and 2
+```{r}
+exp12_file = "results/exp12_run_38_n_70_170_w_250_p_1_1_s_1.25.csv"
+exp12.df = read.csv(exp12_file, header = TRUE) %>% 
+          mutate(study = ifelse(total <= 144, 2, 1))
+slope.exp12 = exp12.df$slope %>% unique()
+intercept.exp12 = exp12.df$intercept %>% unique()
+
+exp1.df = read.csv("../../modeling/humanData/exp1.csv", header = TRUE) %>% select(-X) %>% 
+  mutate(study = 1)
+exp2.df = read.csv("../../modeling/humanData/exp2.csv", header = TRUE) %>% select(-X) %>% 
+  mutate(study = 2)
+
+# plot all data
+exp.1.facet.plot = ggplot(exp12.df %>% filter(study == 1), 
+       aes(x = as.factor(signals), y = modelPrediction,
+           color = as.factor(signals), fill = as.factor(signals))) +
+  # colors
+  scale_colour_manual(values=c(signalPalette), guide = "none") +
+  scale_fill_manual(values=c(signalPalette), guide = "none") +
+  # break up by offset
+  facet_grid(cols = vars(offset), 
+             labeller = labeller(offset = ~ paste(.x, "ms"))) +
+  # # human data
+  stat_summary(data = exp1.df, aes(as.factor(signals), response, 
+                                   color = as.factor(signals)),
+               fun.data = 'mean_cl_boot', alpha = .65, 
+               size = 0.5, stroke = 0.5, linewidth = 1) +
+  # model predictions
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.65,
+               color = "black", stroke = 0.5) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black") + 
+  coord_cartesian(ylim = c(0, 1)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.25)) + 
+  labs(title = "Experiment 1", x = "Number of Signals", 
+       y = "Causal Response Rate", color = "# of Signals") +
+  theme(text = element_text(size=8),
+        aspect.ratio = 2) #.75
+
+# plot all data
+exp.2.plot = ggplot(exp12.df %>% filter(study == 2), 
+       aes(x = signals, y = modelPrediction,
+           color = as.factor(signals), fill = as.factor(signals))) +
+  # colors
+  scale_colour_manual(values=c(signalPalette), guide = "none") +
+  scale_fill_manual(values=c(signalPalette), guide = "none") +
+  # break up by offset
+  facet_grid(cols = vars(offset), 
+             labeller = labeller(offset = ~ paste(.x, "ms"))) +
+  # # human data
+  stat_summary(data = exp2.df, aes(signals, response, color = as.factor(signals)),
+               fun.data = 'mean_cl_boot', alpha = .65,
+               size = 0.5, stroke = 0.5, linewidth = 1) +
+  # model predictions
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.65,
+               color = "black", stroke = 0.5) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black") + 
+  coord_cartesian(xlim = c(0.5, 4.5)) +
+  labs(title = "Experiment 2", x = "Number of Signals", 
+       y = "Causal Response Rate", color = "# of Signals") +
+  theme(legend.title = element_blank(),
+        text = element_text(size=8),
+        aspect.ratio = 1.4)
+
+print(exp.1.facet.plot)
+print(exp.2.plot)
+```
+
+
+## Exp 3
+# get all the necessary data in one place
+```{r}
+exp3_file = "results/exp3_run_719_n_200_400_w_400_p_1.1_1_s_2.csv"
+exp3.df = read.csv(exp3_file, header = TRUE) %>%
+  mutate(modelPredictionLogit = logit(epsilon + (1 - 2 * epsilon) * modelPrediction)) 
+
+exp3A.df = read.csv("../../modeling/humanData/exp3A.csv", header = TRUE) %>% select(-X) %>% 
+  mutate(study = '3A') %>% mutate(location = 0) 
+exp3B.df = read.csv("../../modeling/humanData/exp3B.csv", header = TRUE) %>% select(-X) %>% 
+  mutate(study = '3B') %>% mutate(signals = 3) %>% 
+  mutate(vision = ifelse(realism == 'real', 1, 0)) %>% 
+  mutate(vibration = ifelse(realism == 'real', 1, 0)) %>% 
+  mutate(audio = ifelse(realism == 'real', 1, 0)) %>% 
+  mutate(cueInfo = realism) %>% mutate(cueInfoBasic = realism)
+
+# Fitting the Model Output to the Likert Data
+# Step 1: Apply a logit transform (moves data from 0 -> 1 to -inf -> +inf)
+              
+# merge the data with the model prediction
+exp3A.fit.human.df = merge(exp3.df, exp3A.df)
+
+exp3B.fit.human.df = merge(exp3.df, exp3B.df)
+
+# merge all the data
+# don't want to just bind the ends, but shrink the entire data set
+exp3.fit.human.df = full_join(exp3A.fit.human.df, exp3B.fit.human.df)
+              
+# Step 2: Fit to the human data via a regression (humanData ~ modelPredictionLogit)
+# split into two equal, but random, groups from each of the studies
+# this ensures that we can calculate an RMSE for each data set separately
+set.seed(123)
+exp3A.indices <- sample(1:nrow(exp3A.fit.human.df), nrow(exp3A.fit.human.df)/2)
+exp3B.indices <- sample(1:nrow(exp3B.fit.human.df), nrow(exp3B.fit.human.df)/2)
+              
+exp3.fit.human.half1.df = full_join(exp3A.fit.human.df[exp3A.indices, ],
+                                    exp3B.fit.human.df[exp3B.indices, ]) 
+exp3.fit.human.half2.df = full_join(exp3A.fit.human.df[-exp3A.indices, ],
+                                    exp3B.fit.human.df[-exp3B.indices, ])
+              
+# Fit linear regression to each of these sets
+model.1 = lm(response ~ modelPredictionLogit, data = exp3.fit.human.half1.df)
+model.2 = lm(response ~ modelPredictionLogit, data = exp3.fit.human.half2.df)
+              
+# Step 3: Calculate MSE
+# Calculate appropriate RMSE values from each data set
+predict.m1.half2.A = predict(model.1, 
+                             exp3.fit.human.half2.df %>% filter(study == '3A'), 
+                             se.fit = TRUE)
+predict.m1.half2.B = predict(model.1, 
+                             exp3.fit.human.half2.df %>% filter(study == '3B'),
+                             se.fit = TRUE)
+              
+predict.m2.half1.A = predict(model.2, 
+                             exp3.fit.human.half1.df %>% filter(study == '3A'),
+                             se.fit = TRUE)
+predict.m2.half1.B = predict(model.2, 
+                             exp3.fit.human.half1.df %>% filter(study == '3B'),
+                             se.fit = TRUE)
+              
+rmse.m1.half2.A = sqrt(mean((predict.m1.half2.A$fit - 
+                               (exp3.fit.human.half2.df %>% 
+                                  filter(study == '3A'))$response)^2))
+rmse.m1.half2.B = sqrt(mean((predict.m1.half2.B$fit - 
+                               (exp3.fit.human.half2.df %>% 
+                                  filter(study == '3B'))$response)^2))
+              
+rmse.m2.half1.A = sqrt(mean((predict.m2.half1.A$fit - 
+                               (exp3.fit.human.half1.df %>% 
+                                  filter(study == '3A'))$response)^2))
+rmse.m2.half1.B = sqrt(mean((predict.m2.half1.B$fit - 
+                               (exp3.fit.human.half1.df %>% 
+                                  filter(study == '3B'))$response)^2))
+              
+# even though studies have different n, this treats them equally
+rmse.exp3A = (rmse.m1.half2.A + rmse.m2.half1.A)/2
+rmse.exp3B = (rmse.m1.half2.B + rmse.m2.half1.B)/2
+              
+rmse.exp3 = (rmse.m1.half2.A + rmse.m1.half2.B + rmse.m2.half1.A + rmse.m2.half1.B)/4
+
+intercept.exp3 = (model.1$coefficients[[1]] + model.2$coefficients[[1]])/2
+slope.exp3 = (model.1$coefficients[[2]] + model.2$coefficients[[2]])/2
+```
+
+```{r}
+exp3a.model.graph.df = exp3.df %>% filter(study == "3A") %>%
+  mutate(cueInfoBasic = ifelse(cueInfoBasic == "real", "Realistic",
+                        ifelse(cueInfoBasic == "unreal", "Unrealistic", "Mixed"))) %>%
+  mutate(cueInfoBasic = factor(cueInfoBasic, 
+                               levels = c("Realistic", "Mixed", "Unrealistic"))) %>% 
+  mutate(cueInfo = ifelse(cueInfo == "mix_realVision", "mixReal",
+                   ifelse(cueInfo == "mix_unrealVision", "mixUn", cueInfo))) %>% 
+  mutate(realism = ifelse(realism == "real", "Realistic", "Unrealistic"))
+
+exp3a.data.graph.df = exp3A.df %>% 
+  mutate(cueInfoBasic = ifelse(cueInfoBasic == "real", "Realistic",
+                        ifelse(cueInfoBasic == "unreal", "Unrealistic", "Mixed"))) %>%
+  mutate(cueInfoBasic = factor(cueInfoBasic, 
+                               levels = c("Realistic", "Mixed", "Unrealistic"))) %>% 
+  mutate(cueInfo = ifelse(cueInfo == "mix_realVision", "mixReal",
+                   ifelse(cueInfo == "mix_unrealVision", "mixUn", cueInfo))) %>% 
+  mutate(realism = ifelse(realism == "real", "Realistic", "Unrealistic"))
+
+# plot all data
+exp.3a.plot = ggplot(exp3a.model.graph.df, 
+       aes(x = offset, y = modelPredictionLogit * slope.exp3 + intercept.exp3,
+           color = as.factor(cueInfoBasic), fill = as.factor(cueInfoBasic))) +
+  # colors
+  scale_colour_manual(values=c(cueInfoPalette), guide = "none") +
+  scale_fill_manual(values=c(cueInfoPalette), guide = "none") +
+  # human data
+  stat_summary(data = exp3a.data.graph.df, 
+               aes(offset, response, color = as.factor(cueInfoBasic)),
+               fun.data = 'mean_cl_boot', alpha = .5, 
+               size = 0.5, stroke = 0.5, linewidth = 1,
+               position = position_dodge(50)) +
+  # model predictions
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.75,
+               color = "black", stroke = 0.5,
+               position = position_dodge(50)) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black", position = position_dodge(50)) + 
+  # formatting
+  coord_cartesian(xlim = c(-10, 410), ylim = c(1, 9)) +
+  scale_y_continuous(breaks = seq(1, 9, 1)) +
+  scale_x_continuous(breaks = seq(0, 400, 100)) +
+  labs(title = "Experiment 3A", x = "Offset (ms)", 
+       y = "Causal Response", color = "Signal Realism") +
+  theme(text = element_text(size=8),
+        aspect.ratio = 0.6)
+
+exp.3a.more.plot = ggplot(exp3a.model.graph.df, 
+       aes(x = as.factor(signals), y = modelPredictionLogit * slope.exp3 + intercept.exp3,
+           color = as.factor(cueInfoBasic), fill = as.factor(cueInfoBasic))) +
+  # break up by offset
+  facet_grid(cols = vars(offset), 
+             labeller = labeller(offset = ~ paste(.x, "ms"))) +
+  # colors
+  scale_colour_manual(values=c(cueInfoPalette)) +
+  scale_fill_manual(values=c(cueInfoPalette)) +
+  # human data
+  stat_summary(data = exp3a.data.graph.df,
+               aes(as.factor(signals), response, color = as.factor(cueInfoBasic)),
+               fun.data = 'mean_cl_boot', alpha = .5, 
+               size = 0.5, stroke = 0.5, linewidth = 1,
+               position = position_dodge(1)) +
+  # model predictions
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.75,
+               color = "black", stroke = 0.5,
+               position = position_dodge(1)) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black", position = position_dodge(1)) + 
+  # formatting 
+  coord_cartesian(ylim = c(1, 9)) +
+  scale_y_continuous(breaks = seq(1, 9, 1)) +
+  labs(title = "Experiment 3A", x = "Number of Signals", 
+       y = "Causal Response", color = "Signal Realism") +
+  theme(text = element_text(size=8),
+        aspect.ratio = 1.5)
+
+print(exp.3a.plot)
+print(exp.3a.more.plot)
+```
+# exp 3b
+```{r}
+# plot all data
+exp.3b.plot = ggplot(exp3.df %>% filter(study == "3B") %>% 
+                     mutate(realism = ifelse(realism == "real", "Realistic", "Unrealistic")), 
+       aes(x = offset, y = modelPredictionLogit * slope.exp3 + intercept.exp3,
+           color = as.factor(realism), fill = as.factor(realism))) +
+  # colors
+  scale_colour_manual(values=c(realismPalette)) +
+  scale_fill_manual(values=c(realismPalette), guide = "none") +
+  # human data
+  stat_summary(data = exp3B.df %>% mutate(realism = ifelse(realism == "real", 
+                                                           "Realistic", "Unrealistic")),
+               aes(offset, response, color = as.factor(realism)),
+               fun.data = 'mean_cl_boot', alpha = .5, 
+               size = 0.5, stroke = 0.5, linewidth = 1) +
+  # model predictions
+    stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.75,
+               color = "black", stroke = 0.5,
+               position = position_dodge(0.75)) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black", position = position_dodge(0.75)) + 
+  # formatting
+  coord_cartesian(xlim = c(0, 400), ylim = c(1, 9)) +
+  scale_y_continuous(breaks = seq(1, 9, 1)) +
+  scale_x_continuous(breaks = seq(0, 400, 100)) +
+  labs(title = "Experiment 3B", x = "Offset (ms)", 
+       y = "Causal Response", color = "Signal Realism") +
+  theme(text = element_text(size=8),
+        aspect.ratio = 0.75)
+
+exp3b.model.graph.df = exp3.df %>% filter(study == "3B") %>% 
+  mutate(realism = ifelse(realism == "real", "Realistic", "Unrealistic")) %>% 
+  mutate(location = ifelse(location == 0, "Contact", 
+                    ifelse(location == 0.5, "Midpoint", "Separate"))) %>% 
+  mutate(location = factor(location, levels = c("Contact", "Midpoint", "Separate")))
+exp3b.data.graph.df = exp3B.df %>%
+  mutate(realism = ifelse(realism == "real", "Realistic", "Unrealistic")) %>%
+  mutate(location = ifelse(location == 0, "Contact", 
+                    ifelse(location == 0.5, "Midpoint", "Separate")))  %>% 
+  mutate(location = factor(location, levels = c("Contact", "Midpoint", "Separate")))
+
+# plot all data
+exp.3b.more.plot = ggplot(exp3b.model.graph.df, 
+       aes(x = as.factor(location), 
+           y = modelPredictionLogit * slope.exp3 + intercept.exp3,
+           color = as.factor(realism), fill = as.factor(realism))) +
+  # break up by offset
+  facet_grid(cols = vars(offset), 
+             labeller = labeller(offset = ~ paste(.x, "ms"))) +
+  # colors
+  scale_colour_manual(values=c(realismPalette)) +
+  scale_fill_manual(values=c(realismPalette), guide = "none") +
+  # human data
+  stat_summary(data = exp3b.data.graph.df, 
+               aes(as.factor(location), response, color = as.factor(realism)),
+               fun.data = 'mean_cl_boot', alpha = .5, 
+               size = 0.5, stroke = 0.5, linewidth = 1,
+               position = position_dodge(0)) +
+  # model predictions
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.75,
+               color = "black", stroke = 0.5,
+               position = position_dodge(0)) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black", position = position_dodge(0)) + 
+  # formatting
+  coord_cartesian(ylim = c(1, 9)) +
+  scale_y_continuous(breaks = seq(1, 9, 1)) +
+  labs(title = "Experiment 3B", x = "Location of Audio & Vibrotactile Signal", 
+       y = "Causal Response", color = "Signal Realism") +
+  theme(text = element_text(size = 8),
+        axis.text.x = element_text(size = 4),
+        aspect.ratio = 1.5)
+
+print(exp.3b.plot)
+print(exp.3b.more.plot)
+```

@@ -1,0 +1,154 @@
+---
+title: "relatedWork_finalFit"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# don't need for sherlock
+library("knitr") # for rmd
+library("ggplot2") # for generating plots
+
+# need for sherlock
+library("rwebppl") # for webppl probabalistic programming
+library("dplyr") # for pipes
+library("broom") # for tidy
+
+library("stringr") # str_c
+library("caret")
+
+# Installing Webppl
+# install.packages('devtools') # needed to install rwebppl
+# devtools::install_github("mhtess/rwebppl")
+```
+
+## Settings: for plotting
+```{r}
+theme_set(theme_classic() + 
+    theme(text = element_text(size = 10)))
+
+opts_chunk$set(comment = "#>",
+               fig.show = "hold")
+
+options(dplyr.summarise.inform = F)
+
+# for similarity of colors
+unPalette = c('#E62121', '#3A88E0', '#F7D027', '#68C16A', '#A121C1')
+sensePalette <- c('#4E4E4E', unPalette[3], unPalette[4], unPalette[5])
+
+signalPalette = c("#003f5c", "#7a5195", "#ef5675", "#ffa600")
+
+newBlue = "#349CE9"
+newLightGreen = "#A6D12E"
+realismPalette = c(newLightGreen, newBlue)
+
+cueInfoPalette = c(newBlue, '#96B688', unPalette[3])
+```
+
+# plot the best one
+## Guski
+```{r}
+guski_file = "results/guski_run_408_n_90_40_w_250_p_1_1_s_0.3.csv"
+guski.df = read.csv(guski_file, header = TRUE)
+slope.guski = guski.df$slope %>% unique()
+intercept.guski = guski.df$intercept %>% unique()
+
+# plot all data
+guski.2.plot = ggplot(guski.df %>% filter(study == "GT 2"), 
+       aes(x = offset, y = modelPredictionLogit * slope.guski + intercept.guski,
+           color = as.factor(signals), fill = as.factor(signals))) +
+  # colors
+  scale_colour_manual(values=c(signalPalette)) +
+  scale_fill_manual(values=c(signalPalette)) +
+  # human data
+  stat_summary(aes(offset, medianCausalityScaled, color = as.factor(signals)),
+                geom="point", fun.y = mean, size = 1.5, alpha = 0.65, stroke = 0.5) +
+  stat_summary(aes(offset, medianCausalityScaled, color = as.factor(signals)),
+               geom="errorbar", fun.data = mean_cl_boot, width = 0, size = 0.5) + 
+  # model predictions 
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.65,
+               color = "black", stroke = 0.5) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black") + 
+  # formatting
+  coord_cartesian(xlim = c(0, 400), ylim = c(1, 9)) +
+  scale_y_continuous(breaks = seq(1, 9, 1)) + 
+  scale_x_continuous(breaks = seq(0, 400, 100)) + 
+  labs(title = "Guski and Troje", x = "Time Delay (ms)", y = "Causal Ratings", color = "# of Signals") +
+  theme(text = element_text(size=8),
+        aspect.ratio = 0.75)
+
+print(guski.2.plot)
+```
+
+## Wang
+```{r}
+wang_file = "results/wang_run_468_n_200_250_w_250_p_1_1_s_0.05.csv"
+wang.df = read.csv(wang_file, header = TRUE)
+slope.wang = wang.df$slope %>% unique()
+intercept.wang = wang.df$intercept %>% unique()
+
+# plot all data
+wang.1.plot = ggplot(wang.df, 
+       aes(x = offset, y = modelPredictionLogit * slope.wang + intercept.wang,
+           color = as.factor(signals), fill = as.factor(signals))) +
+  # colors
+  scale_colour_manual(values=c(signalPalette)) +
+  scale_fill_manual(values=c(signalPalette)) +
+  # human data
+  stat_summary(aes(offset, causalRatings, color = as.factor(signals)),
+                geom="point", fun.y = mean, size = 1.5, alpha = 0.65, stroke = 0.5) +
+  stat_summary(aes(offset, causalRatings, color = as.factor(signals)),
+               geom="errorbar", fun.data = mean_cl_boot, width = 0, size = 0.5) + 
+  # model predictions
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.65,
+               color = "black", stroke = 0.5) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black") + 
+  # formatting
+  coord_cartesian(xlim = c(0, 400), ylim = c(1, 9)) +
+  scale_y_continuous(breaks = seq(1, 9, 1)) + 
+  scale_x_continuous(breaks = seq(0, 400, 100)) + 
+  labs(title = "Wang et al.", x = "Time Delay (ms)", y = "Mean Causal Ratings", color = "# of Signals") +
+  theme(text = element_text(size=8), 
+        aspect.ratio = 0.75)
+
+print(wang.1.plot)
+```
+
+
+## Meding
+```{r}
+meding_file = "results/meding_run_2230_n_350_50_w_400_p_1_0.9_s_0.04.csv"
+meding.df = read.csv(meding_file, header = TRUE)
+slope.meding = meding.df$slope %>% unique()
+intercept.meding = meding.df$intercept %>% unique()
+
+# plot all data
+meding.1.plot = ggplot(meding.df %>% mutate(realism = ifelse(realism == "unreal", "Unrealistic", "Realistic")), 
+       aes(x = offset, y = modelPredictionLogit * slope.meding + intercept.meding,
+           color = as.factor(realism), fill = as.factor(realism))) +
+  # colors
+  scale_colour_manual(values=c(realismPalette)) +
+  scale_fill_manual(values=c(realismPalette)) +
+  # human data
+  stat_summary(aes(offset, rating, color = as.factor(realism)),
+                geom="point", fun.y = mean, size = 1.5, alpha = 0.65, stroke = 0.5) +
+  stat_summary(aes(offset, rating, color = as.factor(realism)),
+               geom="errorbar", fun.data = mean_cl_boot, width = 0, size = 0.5) + 
+  # model predictions
+  stat_summary(geom="point", fun.y = mean, size = 1, shape = 21, alpha = 0.65,
+               color = "black", stroke = 0.5) +
+  stat_summary(geom="errorbar", fun.data = mean_cl_boot, width = 0,
+                size = 0.25, col = "black") + 
+  # formatting 
+  coord_cartesian(xlim = c(0, 400), ylim = c(1, 9)) +
+  scale_y_continuous(breaks = seq(1, 9, 1)) + 
+  scale_x_continuous(breaks = seq(0, 400, 100)) + 
+  labs(title = "Meding", x = "Time Delay (ms)", y = "Mean Causal Ratings", color = "Signal Realism") +
+  theme(text = element_text(size=8),
+        aspect.ratio = 0.75)
+
+print(meding.1.plot)
+```

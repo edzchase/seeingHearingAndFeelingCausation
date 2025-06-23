@@ -1,0 +1,92 @@
+var signals = dataFromR[0].num_signals;
+
+var cueV1 = dataFromR[0].cueV1_time;
+var cueV2 = dataFromR[0].cueV2_time;
+var cue1 = dataFromR[0].cue1_time;
+var cue2 = dataFromR[0].cue2_time;
+var cue3 = dataFromR[0].cue3_time;
+
+var realism_cueVision = dataFromR[0].cueVision_real;
+var realism_cue1 = dataFromR[0].cue1_real;
+var realism_cue2 = dataFromR[0].cue2_real;
+var realism_cue3 = dataFromR[0].cue3_real;
+
+var percep_noise_cueV1 = dataFromR[0].cueV1_noise;
+var percep_noise_cueV2 = dataFromR[0].cueV2_noise;
+var percep_noise_cue1 = dataFromR[0].cue1_noise;
+var percep_noise_cue2 = dataFromR[0].cue2_noise;
+var percep_noise_cue3 = dataFromR[0].cue3_noise;
+
+var causal_time_mu = dataFromR[0].window_mean;
+var causal_time_sd = dataFromR[0].window_sigma;
+
+var general_time_left = dataFromR[0].general_left;
+var general_time_right = dataFromR[0].general_right;
+
+var prior_causal = dataFromR[0].p_causal;
+
+var real = dataFromR[0].like_real;
+var unreal = dataFromR[0].like_unreal;
+
+var pixelPerCm = 1/(23.49/3840 * 2.54);
+var spatial_noise_cm = dataFromR[0].spatialUncertainty;
+var velocity = dataFromR[0].velocityAtContact;
+
+var num_samples = dataFromR[0].samples;
+
+var make_same_cause_vision = function() {
+  return gaussian({mu: causal_time_mu, sigma: causal_time_sd});
+}
+
+var make_different_cause = function() {
+  return uniform({a: general_time_left, b: general_time_right})
+}
+
+// Time of visual belief that object A stops motion:  percept_time_cueV1
+// Time of visual belief that object A starts motion: percept_time_cueV2
+// Time of sensory belief that cue1 happens: percep_time_cue1
+// Time of sensory belief that cue2 happens: percep_time_cue2
+// Time of sensory belief that cue3 happens: percep_time_cue3
+var generative_model = function(cue_v1, cue_v2, cue_sense1, cue_sense2, cue_sense3, 
+                                real_vision, real_sense1, real_sense2, real_sense3) {
+  // check for realism -- if real, adjust likelihood of a causal outcome
+  var realism_sum = (signals == 4 ? realism_cueVision + realism_cue1 + realism_cue2 + realism_cue3 : 
+                    (signals == 3 ? realism_cueVision + realism_cue1 + realism_cue2 : 
+                    (signals == 2 ? realism_cueVision + realism_cue1 : 
+                                    realism_cueVision)))
+  var multiplier = Math.pow(real, realism_sum) * Math.pow(unreal, signals - realism_sum)
+ 
+  var is_causal = flip(Math.min(prior_causal*multiplier, 1))
+
+  var percep_time_cueV1 = (is_causal ? make_same_cause_vision() : make_different_cause())
+  var percep_time_cueV2 = (is_causal ? percep_time_cueV1 : make_different_cause())
+  observe(Gaussian({mu: percep_time_cueV1, sigma: percep_noise_cueV1}), cue_v1)
+  observe(Gaussian({mu: percep_time_cueV2, sigma: percep_noise_cueV1}), cue_v2)
+
+  if(signals > 1) {
+    var percep_time_cue1 = (is_causal ? percep_time_cueV1 : make_different_cause())
+    observe(Gaussian({mu: percep_time_cue1, sigma: percep_noise_cue1}), cue_sense1)
+    if(signals > 2) {
+      var percep_time_cue2 = (is_causal ? percep_time_cueV1 : make_different_cause())
+      observe(Gaussian({mu: percep_time_cue2, sigma: percep_noise_cue2}), cue_sense2)
+      if(signals > 3) {
+        var percep_time_cue3 = (is_causal ? percep_time_cueV1 : make_different_cause())
+        observe(Gaussian({mu: percep_time_cue3, sigma: percep_noise_cue3}), cue_sense3)
+      }
+    }
+  }
+
+  // SPATIAL (did the objects touch)
+  // [ms] to [s] (10^-3), [m] to [cm] (10^2) -> (10^-1) to get it into [cm]
+  var gap = Math.min(cue_v2 - cue_v1, 0) * velocity * Math.pow(10, -1) * pixelPerCm
+  var percep_spatial_gap = is_causal ? 0 : gap
+  var spatial_noise = spatial_noise_cm * pixelPerCm 
+  // -see if there is a spatial gap, if there is - how perceivable is it?
+  observe(Gaussian({mu: percep_spatial_gap, sigma: spatial_noise}), gap)
+  
+  return (is_causal)
+}
+
+Infer({method: "MCMC", samples: num_samples, burn: 1000, kernel: "MH"},
+      function() {generative_model(cueV1, cueV2, cue1, cue2, cue3, realism_cueVision, realism_cue1, realism_cue2, realism_cue3)}
+     )

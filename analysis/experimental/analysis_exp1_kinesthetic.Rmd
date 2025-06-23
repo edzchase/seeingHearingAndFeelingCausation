@@ -1,0 +1,323 @@
+---
+title: "exp1_kinesthetic"
+output: html_document
+---
+
+## Load packages 
+```{r setup, echo=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("knitr") # for knitting things
+library("tidyverse") # for all things tidyverse
+library("lme4") # for all linear mixed effects models
+library("quickpsy") # psychometric curve
+library("rstatix") # cohen's d
+library("ggeffects") # predictions
+```
+
+## Settings
+```{r}
+theme_set(theme_classic() + 
+    theme(text = element_text(size = 24)))
+
+opts_chunk$set(comment = "#>",
+               fig.show = "hold")
+
+options(dplyr.summarise.inform = F)
+```
+
+
+## Data Wrangling
+```{r}
+# IMPORT DATA & PREPROCESS
+# check out your current working directory
+getwd()
+# select the desired file(s)
+ourPath =  "../../data/exp1_kinesthetic/"
+csvNames = list.files(path = ourPath, pattern = NULL, 
+                      all.files = FALSE, full.names = FALSE)
+
+data.1.df = data.frame(readr::read_csv(paste0(ourPath, csvNames), 
+                                       id = "file_name", col_names = TRUE)) %>% 
+  ungroup() %>% 
+  # gather id number from the structure of the data files
+  mutate(id = as.numeric(str_remove(str_extract(file_name, "(?<=_p).*"),
+                                    ".csv"))) %>%
+  ## Modifications for Analysis
+  # (1) response was coded as 1 for non-causal and 2 for causal
+  #     -subtract one to set them as 0 and 1 -> good for later manipulation
+  mutate(response = response - 1) %>% 
+  # (2) block was coded as 1 for visual and 2 for visual and haptic
+  #     -also let's make it a factor
+  mutate(block = ifelse(block == 1,"visual","visual&haptic")) %>% 
+  mutate(block = as.factor(block)) %>% 
+  ## Additions
+  # group by participant id, block (modality), and offset
+  group_by(id, block, offset) %>% 
+  # (1) causalTotal: sum causal responses per offset per block
+  mutate(causalTotal = sum(response == 1)) %>% 
+  # (2) numTrials: get total number of trials per offset (as this can change)
+  mutate(numTrials = sum(response == 1) + sum(response == 0)) %>%
+  # (3) causalPercentage: causalTotal/numTrials
+  mutate(causalPercentage = causalTotal/numTrials) %>% ungroup()
+
+# Grab just the causal totals (1 per offsetXblock combo)
+data.1.sub.df = data.1.df %>% 
+  select(id, block, offset, causalTotal, numTrials, causalPercentage) %>% 
+  arrange(id, block, offset) %>% unique()
+
+# Check Out the Data
+glimpse(data.1.sub.df)
+```
+
+# Visualization & Analyses
+
+## CONFIRMATORY
+### Positive Offsets - Model Fit & Hypotheses
+```{r}
+data.pos.df = data.1.df %>% 
+  filter(offset >= 0)
+
+# M0: failed to converge
+# formula = response ~ 1 + block * offset + (1 + block * offset | id)
+# M0.pos = glmer(formula = response ~ 1 + offset * block +
+#                  (1 + offset * block | id),
+#                family = "binomial", data = data.pos.df)
+# M0.1
+M0.1.pos = glmer(formula = response ~ 1 + scale(offset) + block + 
+                   (1 + scale(offset) + block | id),
+                 family = "binomial", data = data.pos.df,
+                 # modification for convergence
+                 control = glmerControl(optimizer = "bobyqa", 
+                                        optCtrl = list(maxfun = 100000)))
+
+# M1
+M1.pos = glmer(formula = response ~ 1 + scale(offset) * block + (1 | id),
+               family = "binomial", data = data.pos.df)
+# M2
+M2.pos = glmer(formula = response ~ 1 + scale(offset) + block + (1 | id),
+               family = "binomial", data = data.pos.df)
+# M3
+M3.pos = glmer(formula = response ~ 1 + scale(offset) + (1 | id), 
+               family = "binomial", data = data.pos.df)
+# M4
+M4.pos = glmer(formula = response ~ 1 + block + (1 | id),
+               family = "binomial", data = data.pos.df)
+
+
+# H1: a significant effect of offset 
+# -- probability of causal responses decrease as the temporal offset increased
+# Test: compare M2 to M4
+anova(M2.pos, M4.pos, method = "LRT")
+summary(M2.pos)
+
+# H2: a significant effect of the trial condition
+# -- probability of causal response would be higher in the vision & haptics 
+#    condition than in the vision only condition.
+# Test: compare M2 and M3
+anova(M2.pos, M3.pos, method = "LRT")
+summary(M2.pos)
+
+# H3: a significant interaction effect between condition and offset
+# -- probability of causal responses decreases more strongly as the temporal 
+#    offset increases for the vision only condition compared to the vision & 
+#    haptics condition
+# Test: compare M1 and M2 
+anova(M1.pos, M2.pos, method = "LRT")
+```
+
+### Generating the Psychometric Curves
+```{r}
+# group into a negative and positive side to create two different curves
+data.sub.neg.df = data.1.sub.df %>% filter(offset <= 0)
+# need to flip the offset temporarily for creating the curve
+data.sub.pos.df = data.1.sub.df %>% filter(offset >= 0) %>% 
+  mutate(offset = -offset)
+
+# fit the negative side with lapses
+fitNegLapse.psy = quickpsy(data.sub.neg.df, x = offset, k = causalTotal, 
+                      n = numTrials, group = .(id, block), lapses = TRUE,
+                  parini = list(c(-150, -1), c(1, 150), c(0, 0.1)))
+
+# fit the positive side with and without lapses
+fitPosLapse.psy = quickpsy(data.sub.pos.df, x = offset, k = causalTotal, 
+                      n = numTrials, group = .(id, block), lapses = TRUE,
+                  parini = list(c(-1000, -1), c(1, 1000), c(0, 0.1)))
+
+# get a sense of the fit of each of these curves
+neg.psy.df = fitNegLapse.psy$sse
+pos.psy.df = fitPosLapse.psy$sse
+```
+### T-Tests
+```{r}
+# H4: differences between conditions greater in the positive offset (delay) 
+#     trials compared to the negative offset (gap) trials
+# -- absolute value difference for the positive and negative offsets in 
+#    thresholds for vision & haptics minus vision only
+# Test: one-tailed paired t-test
+
+# get the threshold values from the psych curves with lapses (mu)
+threshPos.df = data.frame(fitPosLapse.psy$thresholds) %>% 
+  mutate(thre = -thre) %>% # b/c they were reversed to make the curve
+  arrange(id)
+threshNeg.df = data.frame(fitNegLapse.psy$thresholds) %>% 
+  arrange(id)
+
+# merge thresholds and calculate the differences for direct comparison
+threshCombined.df = left_join(threshPos.df %>% select(id, block, thre) %>% 
+                                mutate(block = ifelse(block == 'visual', 'v', 'h')) %>%
+                                pivot_wider(names_from = block, values_from = thre) %>%
+                                mutate(diffPos = abs(h - v)) %>% 
+                                select(id, diffPos),
+                              threshNeg.df %>% select(id, block, thre) %>% 
+                                mutate(block = ifelse(block == 'visual', 'v', 'h')) %>%
+                                pivot_wider(names_from = block, values_from = thre) %>%
+                                mutate(diffNeg = abs(h - v)) %>% 
+                                select(id, diffNeg), by = c("id"))
+# t-test
+t.test(threshCombined.df$diffPos, threshCombined.df$diffNeg, 
+       alternative = "greater",
+       paired = T)
+# cohens d
+threshCombined.df %>% pivot_longer(cols = -id, names_to = "value", values_to = "thre") %>% cohens_d(thre ~ value, paired = TRUE)
+
+# Complimentary Analysis
+# H2: a significant effect of the trial condition
+# -- thresholds are greater in the vision & haptics than in vision only condition
+# Test: one-tailed paired t-test (positive thresholds only)
+
+# t-test
+t.test((threshPos.df %>% filter(block == "visual"))$thre,
+       (threshPos.df %>% filter(block == "visual&haptic"))$thre,
+       alternative = "less",
+       paired = T)
+# cohens d
+threshPos.df %>% cohens_d(thre ~ block, paired = TRUE)
+
+# Exploratory
+# confirmation that if you remove people who always selected causal in the 
+# negative offset condition, it only increases in strength
+# t-test
+id.neg.remove = (threshNeg.df %>% filter(thre <= -150) %>% unique())$id
+
+t.test((threshCombined.df %>% filter(!(id %in% id.neg.remove)))$diffPos,
+       (threshCombined.df %>% filter(!(id %in% id.neg.remove)))$diffNeg,
+       alternative = "greater",
+       paired = T)
+# cohens d
+threshCombined.df %>% filter(!(id %in% id.neg.remove)) %>%  
+  pivot_longer(cols = -id, names_to = "value", values_to = "thre") %>% 
+  cohens_d(thre ~ value, paired = TRUE)
+```
+
+## EXPLORATORY
+### Negative Offsets - Model Fit
+```{r}
+data.neg.df = data.1.df %>% 
+  filter(offset <= 0)
+
+# M0 & M0.1: failed to converge
+# formula = response ~ 1 + block * offset + (1 + block * offset | id)
+# M0.neg = glmer(formula = response ~ 1 + offset * block +
+#                  (1 + offset * block | id),
+#                family = "binomial", data = data.neg.df)
+# M0.1
+# M0.1.neg = glmer(formula = response ~ 1 + offset + block + 
+#                    (1 + offset + block | id),
+#                  family = "binomial", data = data.neg.df)
+# M1
+M1.neg = glmer(formula = response ~ 1 + offset * block + (1 | id),
+               family = "binomial", data = data.neg.df)
+# M2
+M2.neg = glmer(formula = response ~ 1 + offset + block + (1 | id),
+               family = "binomial", data = data.neg.df)
+# M3
+M3.neg = glmer(formula = response ~ 1 + scale(offset) + (1 | id), 
+               family = "binomial", data = data.neg.df)
+# M4
+M4.neg = glmer(formula = response ~ 1 + block + (1 | id),
+               family = "binomial", data = data.neg.df)
+
+# Model comparison 
+# test for effect of offset
+anova(M2.neg,
+      M4.neg,
+      method = "LRT")
+# test for effect of block
+anova(M2.neg,
+      M3.neg,
+      method = "LRT")
+# test for the interaction effect
+anova(M2.neg,
+      M1.neg,
+      method = "LRT")
+
+# "best" model
+summary(M1.neg)
+```
+### T-tests
+```{r}
+# Differences in Threshold for Condition in Negative Offsets
+
+# compare visual&haptic with visual for negative offsets
+# t-test
+t.test((threshNeg.df %>% filter(block == "visual"))$thre,
+       (threshNeg.df %>% filter(block == "visual&haptic"))$thre,
+       paired = T)
+# cohens d
+threshNeg.df %>% cohens_d(thre ~ block, paired = TRUE)
+
+# rinse and repeat, but participants who always selected causal response
+# t-test
+t.test((threshNeg.df %>% 
+          filter(!(id %in% id.neg.remove) & block == "visual"))$thre,
+       (threshNeg.df %>% 
+          filter(!(id %in% id.neg.remove) & block == "visual&haptic"))$thre,
+       paired = T)
+# cohens d
+threshNeg.df %>% filter(!(id %in% id.neg.remove)) %>% 
+  cohens_d(thre ~ block, paired = TRUE)
+```
+
+# DATA VISUALIZATION
+```{r}
+pos.off.predictions.df = ggpredict(M2.pos, terms = c("offset", "block"))
+neg.off.predictions.df = ggpredict(M1.neg, terms = c("offset", "block"))
+
+exp1.predictions.plot = ggplot(pos.off.predictions.df, 
+                               aes(x = x, y = predicted, color = group)) +
+  # base data with mean and confidence interval
+  stat_summary(data = data.1.df,
+               mapping = aes(x = offset, y = response, color = block),
+               fun.data = "mean_cl_boot",
+               size = 1, alpha = 0.5) + 
+  # + offset predictions
+  geom_ribbon(mapping = aes(ymin = conf.low,
+                            ymax = conf.high,
+                            fill = group),
+              alpha = 0.2,
+              color = NA) +
+  geom_line(linewidth = 1) +
+  # - offset predictions
+  geom_ribbon(data = neg.off.predictions.df,
+              mapping = aes(ymin = conf.low,
+                            ymax = conf.high,
+                            fill = group),
+              alpha = 0.2,
+              color = NA) +
+  geom_line(data = neg.off.predictions.df, linewidth = 1) +
+  # colors
+  scale_colour_manual(values = c('#4E4E4E','#F7D027')) +
+  scale_fill_manual(values = c('#4E4E4E','#F7D027')) +
+  # scales
+  coord_cartesian(xlim = c(-100, 600), ylim = c(0,1)) +
+  scale_y_continuous(name = "Causal Response Rate") +
+  scale_x_continuous(name = "Offset (ms)") +
+  theme(legend.title = element_blank(),
+        # text = element_text(size=8),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16), aspect.ratio = 0.75, 
+        legend.position = "none")
+  
+exp1.predictions.plot
+```
