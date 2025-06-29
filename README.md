@@ -81,6 +81,6 @@ The best-performing fits can be plotted using `modeling/finalFit.Rmd` on the res
 ## CRediT author statement
 
 - **Elyse D.Z. Chase**: Conceptualization, Methodology, Software, Validation, Formal analysis, Investigation, Resources, Data Curation, Writing - Original Draft, Writing - Review & Editing, Visualization
-- **Kevin Smith**: 
+- **Kevin Smith**: Conceptualization, Methodology, Formal analysis, Writing - Review & Editing, Supervision
 - **Sean Follmer**: Conceptualization, Methodology, Writing - Review & Editing, Supervision, Project administration, Funding acquisition
 - **Tobias Gerstenberg**: Conceptualization, Methodology, Validation, Formal analysis, Writing - Review & Editing, Supervision, Project administration, Funding acquisition
