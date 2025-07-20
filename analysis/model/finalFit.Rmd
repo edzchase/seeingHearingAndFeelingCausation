@@ -63,7 +63,7 @@ logit <- function(p) {
 # plot the best one
 ## Exp 1 and 2
 ```{r}
-exp12_file = "results/exp12_run_38_n_70_170_w_250_p_1_1_s_1.25.csv"
+exp12_file = "results/exp12_n_70_210_w_240_p_1_1_s_1.25.csv"
 exp12.df = read.csv(exp12_file, header = TRUE) %>% 
           mutate(study = ifelse(total <= 144, 2, 1))
 slope.exp12 = exp12.df$slope %>% unique()
@@ -135,7 +135,7 @@ print(exp.2.plot)
 ## Exp 3
 # get all the necessary data in one place
 ```{r}
-exp3_file = "results/exp3_run_719_n_200_400_w_400_p_1.1_1_s_2.csv"
+exp3_file = "results/exp3_n_200_400_w_400_p_1.1_1_s_2.csv"
 exp3.df = read.csv(exp3_file, header = TRUE) %>%
   mutate(modelPredictionLogit = logit(epsilon + (1 - 2 * epsilon) * modelPrediction)) 
 

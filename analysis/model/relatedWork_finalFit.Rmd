@@ -49,7 +49,7 @@ cueInfoPalette = c(newBlue, '#96B688', unPalette[3])
 # plot the best one
 ## Guski
 ```{r}
-guski_file = "results/guski_run_408_n_90_40_w_250_p_1_1_s_0.3.csv"
+guski_file = "results/guski_n_90_40_w_250_p_1_1_s_0.3.csv"
 guski.df = read.csv(guski_file, header = TRUE)
 slope.guski = guski.df$slope %>% unique()
 intercept.guski = guski.df$intercept %>% unique()
@@ -84,7 +84,7 @@ print(guski.2.plot)
 
 ## Wang
 ```{r}
-wang_file = "results/wang_run_468_n_200_250_w_250_p_1_1_s_0.05.csv"
+wang_file = "results/wang_n_200_250_w_250_p_1_1_s_0.05.csv"
 wang.df = read.csv(wang_file, header = TRUE)
 slope.wang = wang.df$slope %>% unique()
 intercept.wang = wang.df$intercept %>% unique()
@@ -120,7 +120,7 @@ print(wang.1.plot)
 
 ## Meding
 ```{r}
-meding_file = "results/meding_run_2230_n_350_50_w_400_p_1_0.9_s_0.04.csv"
+meding_file = "results/meding_n_350_50_w_400_p_1_0.9_s_0.04.csv"
 meding.df = read.csv(meding_file, header = TRUE)
 slope.meding = meding.df$slope %>% unique()
 intercept.meding = meding.df$intercept %>% unique()

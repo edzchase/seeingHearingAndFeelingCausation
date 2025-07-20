@@ -1,7 +1,6 @@
 # Seeing, Hearing, and Feeling Causation
 
 *Elyse D. Z. Chase (Rice University), Kevin Smith (Massachusetts Institute of Technology), Sean Follmer (Stanford University), Tobias Gerstenberg (Stanford University)*
-*Submitted to Cognitive Science*
 
 ## Contents
 - [Seeing, Hearing, and Feeling Causation](#seeing-hearing-and-feeling-causation)
@@ -52,6 +51,8 @@ Preregistrations for all experiments are available on the Open Science Framework
 │   └── model
 │       ├── relatedWork
 │       └── perceptualData
+├── videos
+│   ├── exp3
 ```
 
 ## Usage
